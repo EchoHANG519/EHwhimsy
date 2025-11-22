@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>再来一层</title>
+    <style>
+        :root {
+            --bg-color-base: #121212;
+            --bg-color-container: #1f1f1f;
+            --text-color-primary: rgba(255, 255, 255, 0.9);
+            --text-color-secondary: rgba(255, 255, 255, 0.55);
+            --primary-color: #177ddc;
+            --primary-color-hover: #165996;
+            --divider-color: rgba(255, 255, 255, 0.15);
+            --shadow-base: 0 8px 32px rgba(0, 0, 0, 0.4);
+            --combo-color: #faad14;
+        }
+
+        body {
+            margin: 0; padding: 0; display: flex; justify-content: center; align-items: center;
+            height: 100vh; height: -webkit-fill-available; background-color: var(--bg-color-base);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            color: var(--text-color-primary); overflow: hidden; touch-action: none;
+        }
+
+        #game-container {
+            position: relative; width: 100%; max-width: 420px; height: 100%; max-height: 800px;
+            background-color: var(--bg-color-container); box-shadow: var(--shadow-base);
+            border-radius: 8px; overflow: hidden;
+        }
+        @media (max-width: 420px) { #game-container { border-radius: 0; max-height: 100vh; } }
+
+        canvas { display: block; width: 100%; height: 100%; background: linear-gradient(to bottom, #0f2027, #203a43, #2c5364); cursor: pointer; touch-action: none; }
+
+        #ui-layer {
+            position: absolute; top: 20px; left: 0; width: 100%; display: flex;
+            flex-direction: column; align-items: center; pointer-events: none; z-index: 5;
+        }
+
+        /* --- iOS 毛玻璃质感 --- */
+        .glass-effect {
+            background-color: rgba(30, 30, 30, 0.65);
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .score-card {
+            padding: 8px 28px; border-radius: 24px;
+            text-align: center; margin-bottom: 10px;
+        }
+        .score-label { font-size: 12px; color: var(--text-color-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        #score { font-size: 28px; font-weight: 600; color: var(--text-color-primary); line-height: 1; }
+        #combo-tip {
+            font-size: 24px; font-weight: 700; color: var(--combo-color);
+            text-shadow: 0 0 10px rgba(250, 173, 20, 0.5); opacity: 0; transform: scale(0.8);
+            transition: all 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
+        #combo-tip.active { opacity: 1; transform: scale(1.2); }
+
+        /* --- 弹窗通用布局 (尺寸统一化核心) --- */
+        .modal-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+            display: flex; justify-content: center; align-items: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s ease; z-index: 10;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        
+        .modal-card {
+            /* 核心尺寸控制 */
+            width: 85%; 
+            max-width: 320px; 
+            min-height: 380px; /* 强制所有弹窗最小高度一致 */
+            max-height: 80%;
+            
+            /* 布局控制：垂直居中，水平居中 */
+            display: flex;
+            flex-direction: column;
+            justify-content: center; 
+            align-items: center;
+            
+            border-radius: 24px;
+            padding: 30px 20px; 
+            box-sizing: border-box;
+            
+            transform: translateY(20px); transition: transform 0.3s ease;
+        }
+        .modal-card.glass-effect { background-color: rgba(35, 35, 35, 0.8); }
+        .modal-overlay.active .modal-card { transform: translateY(0); }
+
+        .modal-title { margin: 0 0 10px 0; font-size: 26px; font-weight: 600; letter-spacing: 0.5px; text-align: center; }
+        .modal-desc { font-size: 15px; color: var(--text-color-secondary); margin-bottom: 20px; line-height: 1.6; text-align: center; }
+        
+        .final-score-highlight {
+            display: block; font-size: 52px; font-weight: 700; color: var(--primary-color);
+            margin: 5px 0 15px 0; text-shadow: 0 0 30px rgba(23, 125, 220, 0.25);
+        }
+
+        /* --- 按钮统一样式 --- */
+        .ant-btn {
+            /* 强制统一大小 */
+            width: 200px; 
+            height: 46px;
+            
+            /* 样式 */
+            background-color: var(--primary-color); color: #fff; border: none;
+            font-size: 16px; font-weight: 600; border-radius: 12px;
+            cursor: pointer; transition: all 0.2s; outline: none; 
+            -webkit-tap-highlight-color: transparent;
+            
+            /* 布局 */
+            display: flex; justify-content: center; align-items: center;
+            margin: 0; /* 由容器 gap 控制间距 */
+        }
+        .ant-btn:hover, .ant-btn:active { background-color: var(--primary-color-hover); transform: scale(0.98); }
+        
+        .ant-btn-secondary {
+            background-color: rgba(255, 255, 255, 0.08); color: var(--text-color-primary); font-weight: 400;
+        }
+        .ant-btn-secondary:hover, .ant-btn-secondary:active { background-color: rgba(255,255,255,0.15); }
+
+        /* 按钮组容器：使用 gap 统一间距 */
+        .button-group {
+            display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;
+        }
+
+        /* --- 排行榜样式优化 --- */
+        .leaderboard-list-container {
+            width: 100%;
+            /* 固定内部高度，保证弹窗高度不会因为空数据或满数据而跳变 */
+            height: 200px; 
+            overflow-y: auto; 
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background-color: rgba(0,0,0,0.1);
+        }
+        .leaderboard-list { list-style: none; padding: 0; margin: 0; width: 100%; }
+        .leaderboard-list::-webkit-scrollbar { width: 4px; }
+        .leaderboard-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+        .leaderboard-item {
+            display: flex; justify-content: space-between; padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-size: 14px;
+        }
+        .leaderboard-item:last-child { border-bottom: none; }
+        .rank { font-weight: bold; margin-right: 10px; color: var(--primary-color); width: 25px;}
+        .name { flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; margin-right: 10px; color: var(--text-color-primary);}
+        .score-val { font-weight: bold; color: var(--combo-color); }
+
+        /* --- 名字输入框样式 --- */
+        #name-input-section {
+            display: none; width: 100%; 
+            flex-direction: column; align-items: center; /* 内部垂直居中 */
+            margin-bottom: 0; /* 由父级 gap 控制 */
+        }
+        #name-input-section.active { display: flex; }
+        
+        .name-input {
+            width: 200px; /* 与按钮宽度一致 */
+            height: 46px; /* 与按钮高度一致 */
+            padding: 0 12px; border-radius: 12px; 
+            border: 1px solid rgba(255,255,255,0.15);
+            background-color: rgba(0,0,0,0.2); color: var(--text-color-primary);
+            font-size: 16px; text-align: center; outline: none; box-sizing: border-box;
+            margin-bottom: 12px;
+        }
+        .name-input:focus { border-color: var(--primary-color); background-color: rgba(0,0,0,0.3); }
+        .name-input::placeholder { color: var(--text-color-secondary); }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+        
+        <div id="ui-layer">
+            <div class="score-card glass-effect">
+                <div class="score-label">Score</div>
+                <div id="score">0</div>
+            </div>
+            <div id="combo-tip">连击 x2!</div>
+        </div>
+
+        <div id="start-screen" class="modal-overlay active">
+            <div class="modal-card glass-effect">
+                <h1 class="modal-title">再来一层</h1>
+                <p class="modal-desc">轻触屏幕，精准堆叠<br>完美连击，分数翻倍</p>
+                
+                <div class="button-group">
+                    <button class="ant-btn" id="start-btn">开始挑战</button>
+                    <button class="ant-btn ant-btn-secondary" id="show-leaderboard-btn-start">排行榜 TOP20</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="game-over-screen" class="modal-overlay">
+            <div class="modal-card glass-effect">
+                <h1 class="modal-title">挑战结束</h1>
+                <div class="modal-desc" id="game-over-desc">
+                    最终得分
+                    <span id="final-score" class="final-score-highlight">0</span>
+                </div>
+                
+                <div id="name-input-section">
+                    <p style="margin: 0 0 10px 0; color: var(--combo-color); font-size: 14px;">恭喜！新纪录！请输入名字：</p>
+                    <input type="text" id="player-name-input" class="name-input" placeholder="你的名字 (最多8字)" maxlength="8">
+                    <button class="ant-btn" id="submit-score-btn">提交成绩</button>
+                </div>
+
+                <div id="game-over-buttons" class="button-group">
+                    <button class="ant-btn" id="restart-btn">再次尝试</button>
+                    <button class="ant-btn ant-btn-secondary" id="show-leaderboard-btn-end">查看排行</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="leaderboard-screen" class="modal-overlay">
+            <div class="modal-card glass-effect">
+                <h1 class="modal-title">排行榜</h1>
+                
+                <div class="leaderboard-list-container">
+                    <ul class="leaderboard-list" id="leaderboard-list-container">
+                        </ul>
+                </div>
+
+                <div class="button-group">
+                    <button class="ant-btn ant-btn-secondary" id="close-leaderboard-btn">返回</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const config = {
+            logicWidth: 400,
+            logicHeight: 600,
+            blockHeight: 35,
+            initialBlockWidth: 220,
+            initialSpeed: 2.5, 
+            speedIncrement: 0.1, 
+            cameraScrollSpeed: 0.12,
+            leaderboardKey: 'zen_stacker_leaderboard_v1'
+        };
+
+        // --- 音效系统 ---
+        const sfx = {
+            perfect: new Audio('https://assets.mixkit.co/sfx/preview/mixkit-arcade-game-jump-coin-216.mp3'),
+            normal: new Audio('https://assets.mixkit.co/sfx/preview/mixkit-game-ball-tap-2073.mp3'),
+            gameOver: new Audio('https://assets.mixkit.co/sfx/preview/mixkit-retro-arcade-game-over-sound-243.mp3')
+        };
+
+        Object.values(sfx).forEach(sound => {
+            sound.preload = 'auto';
+            sound.volume = 0.6; 
+        });
+        sfx.gameOver.volume = 0.8;
+
+        function playPerfectSound(combo) {
+            const sound = sfx.perfect.cloneNode(); 
+            const playbackRate = Math.min(2.0, 1.0 + (combo - 1) * 0.1); 
+            sound.playbackRate = playbackRate;
+            if (sound.preservesPitch !== undefined) { sound.preservesPitch = false; }
+            else if (sound.mozPreservesPitch !== undefined) { sound.mozPreservesPitch = false; }
+            else if (sound.webkitPreservesPitch !== undefined) { sound.webkitPreservesPitch = false; }
+            sound.play().catch(e => console.log('音效播放失败:', e));
+        }
+
+        function playSound(type) {
+            const sound = sfx[type].cloneNode();
+            sound.play().catch(e => console.log('音效播放失败:', e));
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const finalScoreElement = document.getElementById('final-score');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const leaderboardScreen = document.getElementById('leaderboard-screen');
+        const leaderboardListContainer = document.getElementById('leaderboard-list-container');
+        const startBtn = document.getElementById('start-btn');
+        const restartBtn = document.getElementById('restart-btn');
+        const showLeaderboardBtnStart = document.getElementById('show-leaderboard-btn-start');
+        const showLeaderboardBtnEnd = document.getElementById('show-leaderboard-btn-end');
+        const closeLeaderboardBtn = document.getElementById('close-leaderboard-btn');
+        const comboTipElement = document.getElementById('combo-tip');
+        const nameInputSection = document.getElementById('name-input-section');
+        const playerNameInput = document.getElementById('player-name-input');
+        const submitScoreBtn = document.getElementById('submit-score-btn');
+        const gameOverButtons = document.getElementById('game-over-buttons');
+
+        canvas.width = config.logicWidth;
+        canvas.height = config.logicHeight;
+
+        let score = 0;
+        let gameState = 'START';
+        let stack = [];
+        let currentBlock = {};
+        let direction = 1;
+        let speed = config.initialSpeed;
+        let cameraY = 0;
+        let targetCameraY = 0;
+        let comboCount = 0;
+        let comboTipTimeout;
+        let previousScreen = null;
+
+        // --- 排行榜逻辑 ---
+        function getLeaderboardData() {
+            const data = localStorage.getItem(config.leaderboardKey);
+            return data ? JSON.parse(data) : [];
+        }
+        function saveLeaderboardData(data) {
+            localStorage.setItem(config.leaderboardKey, JSON.stringify(data));
+        }
+        function isHighScore(currentScore) {
+            const data = getLeaderboardData();
+            if (data.length < 20) return true;
+            return currentScore > data[data.length - 1].score;
+        }
+        function submitHighScore(name, currentScore) {
+            let data = getLeaderboardData();
+            data.push({ name: name || "无名玩家", score: currentScore });
+            data.sort((a, b) => b.score - a.score);
+            if (data.length > 20) { data = data.slice(0, 20); }
+            saveLeaderboardData(data);
+        }
+        function renderLeaderboard() {
+            const data = getLeaderboardData();
+            leaderboardListContainer.innerHTML = '';
+            if (data.length === 0) {
+                leaderboardListContainer.innerHTML = '<li style="text-align:center; color: var(--text-color-secondary); padding: 20px;">暂无数据，快来挑战!</li>';
+                return;
+            }
+            data.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = 'leaderboard-item';
+                let rankColor = 'var(--primary-color)';
+                if (index === 0) rankColor = '#ffd700'; 
+                else if (index === 1) rankColor = '#c0c0c0'; 
+                else if (index === 2) rankColor = '#cd7f32'; 
+                li.innerHTML = `
+                    <span class="rank" style="color:${rankColor}">#${index + 1}</span>
+                    <span class="name">${item.name}</span>
+                    <span class="score-val">${item.score}</span>
+                `;
+                leaderboardListContainer.appendChild(li);
+            });
+        }
+        function showLeaderboard(fromScreen) {
+            previousScreen = fromScreen;
+            fromScreen.classList.remove('active');
+            renderLeaderboard();
+            leaderboardScreen.classList.add('active');
+        }
+        function closeLeaderboard() {
+            leaderboardScreen.classList.remove('active');
+            if (previousScreen) { previousScreen.classList.add('active'); }
+        }
+
+        // --- 游戏核心逻辑 ---
+        function getBlockColor(index) {
+            const hueStart = 210; const hueRange = 130; const hueStep = 8;
+            const hue = (hueStart + index * hueStep) % 360;
+            return `hsl(${hue}, 75%, 55%)`;
+        }
+
+        function initGame() {
+            score = 0; comboCount = 0; scoreElement.innerText = score;
+            stack = []; speed = config.initialSpeed;
+            cameraY = 0; targetCameraY = 0; direction = 1;
+            gameState = 'PLAYING';
+            hideComboTip();
+            startScreen.classList.remove('active');
+            gameOverScreen.classList.remove('active');
+            stack.push({ x: config.logicWidth / 2 - config.initialBlockWidth / 2, y: config.logicHeight, width: config.initialBlockWidth, height: config.blockHeight, color: '#2c3e50' });
+            spawnNextBlock(); gameLoop();
+        }
+
+        function spawnNextBlock() {
+            const topBlock = stack[stack.length - 1];
+            const yPos = topBlock.y - config.blockHeight;
+            const color = getBlockColor(stack.length - 1); 
+            currentBlock = { x: direction === 1 ? -topBlock.width : config.logicWidth, y: yPos, width: topBlock.width, height: config.blockHeight, color: color };
+        }
+
+        function showComboTip(count) {
+            if (count < 2) return;
+            comboTipElement.innerText = `连击 x${count}!`;
+            comboTipElement.classList.add('active');
+            clearTimeout(comboTipTimeout);
+            comboTipTimeout = setTimeout(() => { comboTipElement.classList.remove('active'); }, 1000);
+        }
+
+        function hideComboTip() {
+            comboTipElement.classList.remove('active'); clearTimeout(comboTipTimeout);
+        }
+
+        function placeBlock() {
+            if (gameState !== 'PLAYING') return;
+            const prevBlock = stack[stack.length - 1];
+            const overlap = currentBlock.width - Math.abs(currentBlock.x - prevBlock.x);
+            if (overlap > 0) {
+                let newX = Math.max(currentBlock.x, prevBlock.x);
+                let isPerfect = false;
+                const tolerance = 4; 
+                if (Math.abs(currentBlock.x - prevBlock.x) < tolerance) {
+                    newX = prevBlock.x; currentBlock.width = prevBlock.width; isPerfect = true;
+                } else {
+                    currentBlock.width = overlap;
+                }
+                currentBlock.x = newX; stack.push(currentBlock);
+                
+                if (isPerfect) {
+                    comboCount++;
+                    score += (2 * comboCount); 
+                    showComboTip(comboCount);
+                    playPerfectSound(comboCount);
+                } else {
+                    comboCount = 0; 
+                    score += 1;
+                    hideComboTip();
+                    playSound('normal');
+                }
+                
+                scoreElement.innerText = score; speed += config.speedIncrement;
+                const marginBlocks = 8; 
+                if (stack.length > marginBlocks) { targetCameraY = (stack.length - marginBlocks) * config.blockHeight; }
+                spawnNextBlock();
+            } else {
+                endGame();
+            }
+        }
+
+        function endGame() {
+            gameState = 'GAMEOVER';
+            finalScoreElement.innerText = score;
+            hideComboTip();
+            playSound('gameOver');
+            
+            if (score > 0 && isHighScore(score)) {
+                nameInputSection.classList.add('active');
+                gameOverButtons.style.display = 'none';
+                playerNameInput.value = '';
+            } else {
+                nameInputSection.classList.remove('active');
+                gameOverButtons.style.display = 'flex';
+            }
+            
+            gameOverScreen.classList.add('active');
+        }
+
+        submitScoreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const name = playerNameInput.value.trim() || "匿名玩家";
+            submitHighScore(name, score);
+            nameInputSection.classList.remove('active');
+            gameOverButtons.style.display = 'flex';
+            showLeaderboard(gameOverScreen);
+        });
+
+        function draw() {
+            ctx.clearRect(0, 0, config.logicWidth, config.logicHeight);
+            cameraY += (targetCameraY - cameraY) * config.cameraScrollSpeed;
+            ctx.save(); ctx.translate(0, cameraY);
+            stack.forEach(block => drawBlock(block));
+            if (gameState === 'PLAYING') drawBlock(currentBlock);
+            ctx.restore();
+        }
+
+        function drawBlock(block) {
+            ctx.fillStyle = block.color; ctx.fillRect(block.x, block.y, block.width, block.height);
+            ctx.fillStyle = "rgba(255, 255, 255, 0.4)"; ctx.fillRect(block.x, block.y, block.width, 2);
+            ctx.fillStyle = "rgba(0, 0, 0, 0.2)"; ctx.fillRect(block.x, block.y + block.height - 3, block.width, 3);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.15)"; ctx.lineWidth = 1; ctx.strokeRect(block.x + 0.5, block.y + 0.5, block.width - 1, block.height - 1);
+        }
+
+        function update() {
+            if (gameState !== 'PLAYING') return;
+            currentBlock.x += speed * direction;
+            if (currentBlock.x + currentBlock.width > config.logicWidth) { currentBlock.x = config.logicWidth - currentBlock.width; direction = -1; }
+            else if (currentBlock.x < 0) { currentBlock.x = 0; direction = 1; }
+        }
+
+        function gameLoop() {
+            update(); draw();
+            if (gameState !== 'GAMEOVER') requestAnimationFrame(gameLoop);
+        }
+
+        let audioUnlocked = false;
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            Object.values(sfx).forEach(sound => {
+                sound.play().then(() => {
+                    sound.pause();
+                    sound.currentTime = 0;
+                }).catch(() => {});
+            });
+            audioUnlocked = true;
+        }
+
+        canvas.addEventListener('pointerdown', (e) => { 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            unlockAudio(); 
+            placeBlock(); 
+        }, { passive: false });
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                unlockAudio();
+                if (gameState === 'START') initGame(); else if (gameState === 'PLAYING') placeBlock(); else if (gameState === 'GAMEOVER') initGame();
+            }
+        });
+
+        startBtn.addEventListener('click', (e) => { e.stopPropagation(); unlockAudio(); initGame(); });
+        restartBtn.addEventListener('click', (e) => { e.stopPropagation(); unlockAudio(); initGame(); });
+        showLeaderboardBtnStart.addEventListener('click', (e) => { e.stopPropagation(); showLeaderboard(startScreen); });
+        showLeaderboardBtnEnd.addEventListener('click', (e) => { e.stopPropagation(); showLeaderboard(gameOverScreen); });
+        closeLeaderboardBtn.addEventListener('click', (e) => { e.stopPropagation(); closeLeaderboard(); });
+        playerNameInput.addEventListener('click', (e) => e.stopPropagation());
+
+        document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+        document.addEventListener('dblclick', function(e) { e.preventDefault(); }, { passive: false });
+
+        draw();
+    </script>
+</body>
+</html>
